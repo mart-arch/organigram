@@ -141,8 +141,7 @@
     </main>
 
     <script>
-      const XML_URL =
-        "https://portal.isoss.gov.cz/opendata/ISoSS_Opendata_OSYS_OSSS.xml";
+      const XML_URL = "./ISoSS_Opendata_OSYS_OSSS.xml";
       const treeContainer = document.getElementById("tree");
       const statusBox = document.getElementById("status");
 
@@ -270,7 +269,7 @@
 
       loadXml().catch((error) => {
         setStatus(
-          `Chyba načtení: ${error.message} Zkontrolujte dostupnost URL nebo CORS.`
+          `Chyba načtení: ${error.message} Zkontrolujte, že soubor ISoSS_Opendata_OSYS_OSSS.xml je ve stejné složce jako index.html.`
         );
       });
     </script>
