@@ -1,0 +1,277 @@
+<!doctype html>
+<html lang="cs">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Organigram z XML</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      }
+
+      body {
+        margin: 0;
+        background: #f4f6f8;
+        color: #1b2430;
+      }
+
+      main {
+        max-width: 1100px;
+        margin: 0 auto;
+        padding: 1.2rem;
+      }
+
+      h1 {
+        margin: 0 0 0.8rem;
+        font-size: 1.6rem;
+      }
+
+      .toolbar {
+        display: flex;
+        gap: 0.6rem;
+        flex-wrap: wrap;
+        margin-bottom: 1rem;
+      }
+
+      button {
+        border: 1px solid #cad1d8;
+        border-radius: 8px;
+        padding: 0.45rem 0.8rem;
+        cursor: pointer;
+        background: white;
+      }
+
+      .status {
+        background: white;
+        border: 1px solid #d9e0e7;
+        border-radius: 8px;
+        padding: 0.75rem;
+        margin-bottom: 1rem;
+      }
+
+      #tree {
+        background: white;
+        border: 1px solid #d9e0e7;
+        border-radius: 10px;
+        padding: 0.75rem;
+        overflow: auto;
+      }
+
+      ul {
+        list-style: none;
+        margin: 0;
+        padding-left: 1rem;
+      }
+
+      li {
+        margin: 0.2rem 0;
+      }
+
+      .node {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.35rem;
+        border-radius: 6px;
+        padding: 0.15rem 0.3rem;
+      }
+
+      .node:hover {
+        background: #eef3ff;
+      }
+
+      .toggle {
+        border: 0;
+        background: transparent;
+        width: 1.1rem;
+        min-width: 1.1rem;
+        height: 1.1rem;
+        line-height: 1;
+        padding: 0;
+        font-weight: 700;
+      }
+
+      .hidden {
+        display: none;
+      }
+
+      .meta {
+        color: #4e5b6b;
+        font-size: 0.84rem;
+      }
+
+      .name {
+        font-weight: 600;
+      }
+
+      @media (prefers-color-scheme: dark) {
+        body {
+          background: #0f1720;
+          color: #deebff;
+        }
+
+        .status,
+        #tree,
+        button {
+          background: #16202a;
+          border-color: #2f3b48;
+          color: #deebff;
+        }
+
+        .node:hover {
+          background: #1e2d3f;
+        }
+
+        .meta {
+          color: #9eb0c6;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Klikatelný rozbalovací organigram z XML</h1>
+      <div class="toolbar">
+        <button id="reload">Načíst data znovu</button>
+        <button id="expandAll">Rozbalit vše</button>
+        <button id="collapseAll">Sbalit vše</button>
+      </div>
+      <div class="status" id="status">Načítám XML…</div>
+      <div id="tree" aria-live="polite"></div>
+    </main>
+
+    <script>
+      const XML_URL = "./ISoSS_Opendata_OSYS_OSSS.xml";
+      const treeContainer = document.getElementById("tree");
+      const statusBox = document.getElementById("status");
+
+      const setStatus = (text) => {
+        statusBox.textContent = text;
+      };
+
+      const nodeLabel = (entry) => {
+        const name = entry.querySelector("nazev")?.textContent?.trim() || "Bez názvu";
+        const ico = entry.querySelector("ic")?.textContent?.trim();
+        const id = entry.querySelector("id")?.textContent?.trim();
+
+        const label = document.createElement("span");
+        label.className = "name";
+        label.textContent = name;
+
+        const meta = document.createElement("span");
+        meta.className = "meta";
+        meta.textContent = [ico ? `IČO: ${ico}` : null, id ? `ID: ${id}` : null]
+          .filter(Boolean)
+          .join(" • ");
+
+        return { label, meta };
+      };
+
+      const createTreeNode = (entry) => {
+        const li = document.createElement("li");
+        const wrapper = document.createElement("div");
+        wrapper.className = "node";
+
+        const childEntries = Array.from(entry.children).filter(
+          (el) => el.tagName.toLowerCase() === "zaznam"
+        );
+
+        const { label, meta } = nodeLabel(entry);
+
+        if (childEntries.length > 0) {
+          const toggle = document.createElement("button");
+          toggle.className = "toggle";
+          toggle.type = "button";
+          toggle.textContent = "−";
+          wrapper.append(toggle);
+
+          const childrenList = document.createElement("ul");
+          childEntries.forEach((child) => {
+            childrenList.appendChild(createTreeNode(child));
+          });
+
+          toggle.addEventListener("click", () => {
+            const isHidden = childrenList.classList.toggle("hidden");
+            toggle.textContent = isHidden ? "+" : "−";
+          });
+
+          wrapper.append(label);
+          if (meta.textContent) wrapper.append(meta);
+          li.append(wrapper, childrenList);
+        } else {
+          const spacer = document.createElement("span");
+          spacer.className = "toggle";
+          spacer.textContent = "•";
+          wrapper.append(spacer, label);
+          if (meta.textContent) wrapper.append(meta);
+          li.append(wrapper);
+        }
+
+        return li;
+      };
+
+      const renderTree = (xmlText) => {
+        const parser = new DOMParser();
+        const xmlDoc = parser.parseFromString(xmlText, "application/xml");
+        const parseError = xmlDoc.querySelector("parsererror");
+        if (parseError) {
+          throw new Error("Nepodařilo se zpracovat XML.");
+        }
+
+        const rootEntries = Array.from(xmlDoc.children[0].children).filter(
+          (el) => el.tagName.toLowerCase() === "zaznam"
+        );
+
+        if (!rootEntries.length) {
+          throw new Error("V XML nebyly nalezeny žádné záznamy.");
+        }
+
+        const rootList = document.createElement("ul");
+        rootEntries.forEach((entry) => rootList.appendChild(createTreeNode(entry)));
+
+        treeContainer.replaceChildren(rootList);
+        setStatus(`Načteno uzlů: ${xmlDoc.querySelectorAll("zaznam").length}`);
+      };
+
+      const loadXml = async () => {
+        setStatus("Načítám XML…");
+        treeContainer.textContent = "";
+
+        const response = await fetch(XML_URL);
+        if (!response.ok) {
+          throw new Error(`Server vrátil chybu ${response.status}.`);
+        }
+
+        const xmlText = await response.text();
+        renderTree(xmlText);
+      };
+
+      const setAllExpanded = (expand) => {
+        treeContainer.querySelectorAll(".toggle").forEach((button) => {
+          if (button.tagName !== "BUTTON") return;
+          const children = button.parentElement?.nextElementSibling;
+          if (!children) return;
+          children.classList.toggle("hidden", !expand);
+          button.textContent = expand ? "−" : "+";
+        });
+      };
+
+      document.getElementById("reload").addEventListener("click", async () => {
+        try {
+          await loadXml();
+        } catch (error) {
+          setStatus(`Chyba načtení: ${error.message}`);
+        }
+      });
+
+      document.getElementById("expandAll").addEventListener("click", () => setAllExpanded(true));
+      document.getElementById("collapseAll").addEventListener("click", () => setAllExpanded(false));
+
+      loadXml().catch((error) => {
+        setStatus(
+          `Chyba načtení: ${error.message} Zkontrolujte, že soubor ISoSS_Opendata_OSYS_OSSS.xml je ve stejné složce jako index.html.`
+        );
+      });
+    </script>
+  </body>
+</html>
