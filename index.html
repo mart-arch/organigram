@@ -1,0 +1,415 @@
+<!doctype html>
+<html lang="cs">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Organigram z XML</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      }
+
+      body {
+        margin: 0;
+        background: #f4f6f8;
+        color: #1b2430;
+      }
+
+      main {
+        max-width: 1100px;
+        margin: 0 auto;
+        padding: 1.2rem;
+      }
+
+      h1 {
+        margin: 0 0 0.8rem;
+        font-size: 1.6rem;
+      }
+
+      .toolbar {
+        display: flex;
+        gap: 0.6rem;
+        flex-wrap: wrap;
+        margin-bottom: 1rem;
+      }
+
+      button {
+        border: 1px solid #cad1d8;
+        border-radius: 8px;
+        padding: 0.45rem 0.8rem;
+        cursor: pointer;
+        background: white;
+      }
+
+      .status {
+        background: white;
+        border: 1px solid #d9e0e7;
+        border-radius: 8px;
+        padding: 0.75rem;
+        margin-bottom: 1rem;
+      }
+
+      #tree {
+        background: white;
+        border: 1px solid #d9e0e7;
+        border-radius: 10px;
+        padding: 0.75rem;
+        overflow: auto;
+      }
+
+      ul {
+        list-style: none;
+        margin: 0;
+        padding-left: 1rem;
+      }
+
+      li {
+        margin: 0.2rem 0;
+      }
+
+      .node {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.35rem;
+        border-radius: 6px;
+        padding: 0.15rem 0.3rem;
+      }
+
+      .node:hover {
+        background: #eef3ff;
+      }
+
+      .toggle {
+        border: 0;
+        background: transparent;
+        width: 1.1rem;
+        min-width: 1.1rem;
+        height: 1.1rem;
+        line-height: 1;
+        padding: 0;
+        font-weight: 700;
+      }
+
+      .hidden {
+        display: none;
+      }
+
+      .meta {
+        color: #4e5b6b;
+        font-size: 0.84rem;
+      }
+
+      .name {
+        font-weight: 600;
+      }
+
+      @media (prefers-color-scheme: dark) {
+        body {
+          background: #0f1720;
+          color: #deebff;
+        }
+
+        .status,
+        #tree,
+        button {
+          background: #16202a;
+          border-color: #2f3b48;
+          color: #deebff;
+        }
+
+        .node:hover {
+          background: #1e2d3f;
+        }
+
+        .meta {
+          color: #9eb0c6;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Klikatelný rozbalovací organigram z XML</h1>
+      <div class="toolbar">
+        <button id="reload">Načíst data znovu</button>
+        <button id="expandAll">Rozbalit vše</button>
+        <button id="collapseAll">Sbalit vše</button>
+      </div>
+      <div class="status" id="status">Načítám XML…</div>
+      <div id="tree" aria-live="polite"></div>
+    </main>
+
+    <script>
+      const XML_URL = "./ISoSS_Opendata_OSYS_OSSS.xml";
+      const treeContainer = document.getElementById("tree");
+      const statusBox = document.getElementById("status");
+
+      const setStatus = (text) => {
+        statusBox.textContent = text;
+      };
+
+      const getAttr = (element, name) => element.getAttribute(name)?.trim() || "";
+
+      const nodeLabel = (node) => {
+        const label = document.createElement("span");
+        label.className = "name";
+        label.textContent = node.name || "Bez názvu";
+
+        const meta = document.createElement("span");
+        meta.className = "meta";
+        meta.textContent = [
+          node.kind === "unit" ? "Organizační jednotka" : "Úřad",
+          node.shortcut ? `Zkratka: ${node.shortcut}` : null,
+          node.id ? `ID: ${node.id}` : null,
+          node.dataBox ? `ID DS: ${node.dataBox}` : null,
+          node.externalId ? `Externí ID: ${node.externalId}` : null,
+          node.workPlaces ? `Pracovní místa: ${node.workPlaces}` : null,
+          node.servicePlaces ? `Služební místa: ${node.servicePlaces}` : null,
+        ]
+          .filter(Boolean)
+          .join(" • ");
+
+        return { label, meta };
+      };
+
+      const createTreeNode = (node) => {
+        const li = document.createElement("li");
+        const wrapper = document.createElement("div");
+        wrapper.className = "node";
+
+        const { label, meta } = nodeLabel(node);
+
+        if (node.children.length > 0) {
+          const toggle = document.createElement("button");
+          toggle.className = "toggle";
+          toggle.type = "button";
+          toggle.textContent = "−";
+          wrapper.append(toggle);
+
+          const childrenList = document.createElement("ul");
+          node.children.forEach((child) => {
+            childrenList.appendChild(createTreeNode(child));
+          });
+
+          toggle.addEventListener("click", () => {
+            const isHidden = childrenList.classList.toggle("hidden");
+            toggle.textContent = isHidden ? "+" : "−";
+          });
+
+          wrapper.append(label);
+          if (meta.textContent) wrapper.append(meta);
+          li.append(wrapper, childrenList);
+        } else {
+          const spacer = document.createElement("span");
+          spacer.className = "toggle";
+          spacer.textContent = "•";
+          wrapper.append(spacer, label);
+          if (meta.textContent) wrapper.append(meta);
+          li.append(wrapper);
+        }
+
+        return li;
+      };
+
+      const parseUradSluzebniForest = (xmlDoc) => {
+        const offices = Array.from(xmlDoc.getElementsByTagNameNS("*", "UradSluzebni"));
+        if (!offices.length) return null;
+
+        const byId = new Map();
+        const waitingChildren = new Map();
+
+        offices.forEach((office) => {
+          const id = getAttr(office, "id");
+          const parentId = getAttr(office, "idNadrizene");
+          const node = {
+            kind: "office",
+            id,
+            parentId,
+            name: getAttr(office, "oznaceni") || getAttr(office, "nazev"),
+            shortcut: getAttr(office, "zkratka"),
+            dataBox: getAttr(office, "idDS"),
+            externalId: "",
+            workPlaces: "",
+            servicePlaces: "",
+            children: [],
+          };
+
+          byId.set(id, node);
+
+          if (waitingChildren.has(id)) {
+            node.children.push(...waitingChildren.get(id));
+            waitingChildren.delete(id);
+          }
+
+          if (parentId) {
+            const parent = byId.get(parentId);
+            if (parent) {
+              parent.children.push(node);
+            } else {
+              if (!waitingChildren.has(parentId)) waitingChildren.set(parentId, []);
+              waitingChildren.get(parentId).push(node);
+            }
+          }
+        });
+
+        return Array.from(byId.values()).filter(
+          (node) => !node.parentId || !byId.has(node.parentId)
+        );
+      };
+
+      const parseJednotkaOrganizacniNode = (element) => {
+        const childUnits = Array.from(element.children).filter(
+          (el) => el.localName === "JednotkaOrganizacni"
+        );
+
+        return {
+          kind: "unit",
+          id: getAttr(element, "id"),
+          parentId: "",
+          name: getAttr(element, "oznaceni") || getAttr(element, "nazev") || "Bez názvu",
+          shortcut: getAttr(element, "zkratka"),
+          dataBox: "",
+          externalId: getAttr(element, "idExterni"),
+          workPlaces: getAttr(element, "mistoPracovniPocet"),
+          servicePlaces: getAttr(element, "mistoSluzebniPocet"),
+          children: childUnits.map(parseJednotkaOrganizacniNode),
+        };
+      };
+
+      const parseOfficeStructures = (xmlDoc) => {
+        const structures = Array.from(
+          xmlDoc.getElementsByTagNameNS("*", "UradSluzebniStrukturaOrganizacni")
+        );
+        const structureByOfficeId = new Map();
+
+        structures.forEach((structureNode) => {
+          const officeId = getAttr(structureNode, "id");
+          if (!officeId) return;
+
+          const topUnits = Array.from(structureNode.children)
+            .filter((child) => child.localName === "StrukturaOrganizacni")
+            .flatMap((strukturaNode) =>
+              Array.from(strukturaNode.children).filter(
+                (unitNode) => unitNode.localName === "JednotkaOrganizacni"
+              )
+            )
+            .map(parseJednotkaOrganizacniNode);
+
+          structureByOfficeId.set(officeId, topUnits);
+        });
+
+        return structureByOfficeId;
+      };
+
+      const attachOfficeStructures = (forest, structureByOfficeId) => {
+        const addStructures = (node) => {
+          node.children.forEach(addStructures);
+          const structures = structureByOfficeId.get(node.id);
+          if (structures?.length) {
+            node.children.push(...structures);
+          }
+        };
+
+        forest.forEach(addStructures);
+      };
+
+      const parseLegacyZaznamForest = (xmlDoc) => {
+        const parseZaznamNode = (entry) => {
+          const children = Array.from(entry.children).filter(
+            (el) => el.localName?.toLowerCase() === "zaznam"
+          );
+          return {
+            kind: "legacy",
+            id: entry.querySelector("id")?.textContent?.trim() || "",
+            parentId: "",
+            name: entry.querySelector("nazev")?.textContent?.trim() || "Bez názvu",
+            shortcut: "",
+            dataBox: "",
+            externalId: "",
+            workPlaces: "",
+            servicePlaces: "",
+            children: children.map(parseZaznamNode),
+          };
+        };
+
+        const root = xmlDoc.documentElement;
+        if (!root) return [];
+
+        const rootEntries = Array.from(root.children).filter(
+          (el) => el.localName?.toLowerCase() === "zaznam"
+        );
+
+        return rootEntries.map(parseZaznamNode);
+      };
+
+      const renderTree = (xmlText) => {
+        const parser = new DOMParser();
+        const xmlDoc = parser.parseFromString(xmlText, "application/xml");
+        const parseError = xmlDoc.querySelector("parsererror");
+        if (parseError) {
+          throw new Error("Nepodařilo se zpracovat XML.");
+        }
+
+        const uradForest = parseUradSluzebniForest(xmlDoc);
+        const forest = uradForest && uradForest.length ? uradForest : parseLegacyZaznamForest(xmlDoc);
+
+        if (uradForest && uradForest.length) {
+          const structureByOfficeId = parseOfficeStructures(xmlDoc);
+          attachOfficeStructures(forest, structureByOfficeId);
+        }
+
+        if (!forest.length) {
+          throw new Error("V XML nebyly nalezeny podporované záznamy.");
+        }
+
+        const rootList = document.createElement("ul");
+        forest.forEach((entry) => rootList.appendChild(createTreeNode(entry)));
+
+        treeContainer.replaceChildren(rootList);
+        const total = treeContainer.querySelectorAll("li").length;
+        setStatus(`Načteno uzlů: ${total}`);
+      };
+
+      const loadXml = async () => {
+        setStatus("Načítám XML…");
+        treeContainer.textContent = "";
+
+        const response = await fetch(XML_URL);
+        if (!response.ok) {
+          throw new Error(`Server vrátil chybu ${response.status}.`);
+        }
+
+        const xmlText = await response.text();
+        renderTree(xmlText);
+      };
+
+      const setAllExpanded = (expand) => {
+        treeContainer.querySelectorAll(".toggle").forEach((button) => {
+          if (button.tagName !== "BUTTON") return;
+          const children = button.parentElement?.nextElementSibling;
+          if (!children) return;
+          children.classList.toggle("hidden", !expand);
+          button.textContent = expand ? "−" : "+";
+        });
+      };
+
+      document.getElementById("reload").addEventListener("click", async () => {
+        try {
+          await loadXml();
+        } catch (error) {
+          setStatus(`Chyba načtení: ${error.message}`);
+        }
+      });
+
+      document.getElementById("expandAll").addEventListener("click", () => setAllExpanded(true));
+      document.getElementById("collapseAll").addEventListener("click", () => setAllExpanded(false));
+
+      loadXml().catch((error) => {
+        setStatus(
+          `Chyba načtení: ${error.message} Zkontrolujte, že soubor ISoSS_Opendata_OSYS_OSSS.xml je ve stejné složce jako index.html.`
+        );
+      });
+    </script>
+  </body>
+</html>
